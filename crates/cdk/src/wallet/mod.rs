@@ -264,16 +264,18 @@ impl Wallet {
     pub async fn fetch_mint_info(&self) -> Result<Option<MintInfo>, Error> {
         match self.client.get_mint_info().await {
             Ok(mint_info) => {
-                // If mint provides time make sure it is accurate
+                // If mint provides time, log it but don't enforce tolerance
                 if let Some(mint_unix_time) = mint_info.time {
                     let current_unix_time = unix_time();
-                    if current_unix_time.abs_diff(mint_unix_time) > 30 {
+                    let time_diff = current_unix_time.abs_diff(mint_unix_time);
+                    if time_diff > 30 {
                         tracing::warn!(
-                            "Mint time does match wallet time. Mint: {}, Wallet: {}",
+                            "Mint '{}' time differs from wallet time by {} seconds. Mint: {}, Wallet: {}",
+                            mint_info.name.as_deref().unwrap_or("unknown"),
+                            time_diff,
                             mint_unix_time,
                             current_unix_time
                         );
-                        return Err(Error::MintTimeExceedsTolerance);
                     }
                 }
 
