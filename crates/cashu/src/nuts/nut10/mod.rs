@@ -252,6 +252,9 @@ use super::Proofs;
 /// BIP-340 tag for the NUT-11 v1 SIG_ALL message hash (P2PK and HTLC).
 const SIG_ALL_SIG_TAG: &[u8] = b"Cashu_SigAllSig_v1";
 
+/// BIP-340 tag for an unpoisonable NUT-11 v1 SIG_ALL swap.
+const SIG_ALL_UNPOISONABLE_TAG: &[u8] = b"Cashu_SigAllUnpoisonable_v1";
+
 /// NUT-11 v1 SIG_ALL message: length-framed bytes.
 ///
 /// Commits to the quote id (empty for swaps), each input's secret and C, then
@@ -279,7 +282,16 @@ pub(crate) fn sig_all_msg_to_sign_v1(
 /// NUT-11 v1 SIG_ALL message hash: the BIP-340 tagged hash
 /// `SHA256(SHA256(tag) || SHA256(tag) || message)`, signed without further hashing.
 pub(crate) fn sig_all_message_hash_v1(message: &[u8]) -> [u8; 32] {
-    let tag_hash = Sha256Hash::hash(SIG_ALL_SIG_TAG).to_byte_array();
+    sig_all_tagged_hash(SIG_ALL_SIG_TAG, message)
+}
+
+/// Unpoisonable NUT-11 v1 SIG_ALL message hash.
+pub(crate) fn sig_all_unpoisonable_message_hash_v1(message: &[u8]) -> [u8; 32] {
+    sig_all_tagged_hash(SIG_ALL_UNPOISONABLE_TAG, message)
+}
+
+fn sig_all_tagged_hash(tag: &[u8], message: &[u8]) -> [u8; 32] {
+    let tag_hash = Sha256Hash::hash(tag).to_byte_array();
     let mut preimage = Vec::with_capacity(64 + message.len());
     preimage.extend_from_slice(&tag_hash);
     preimage.extend_from_slice(&tag_hash);
@@ -302,6 +314,11 @@ pub trait SpendingConditionVerification {
     /// Construct the NUT-11 v1 (length-framed) SIG_ALL message
     fn sig_all_msg_to_sign_v1(&self) -> Vec<u8>;
 
+    /// Whether this request selects unpoisonable SIG_ALL authorization.
+    fn is_unpoisonable(&self) -> bool {
+        false
+    }
+
     /// Digests of the SIG_ALL message formats accepted during verification, newest first.
     ///
     /// Each digest is signed directly with Schnorr: the v1 tagged hash, then the
@@ -310,6 +327,12 @@ pub trait SpendingConditionVerification {
     /// towards thresholds (NUT-11). The pre-0.14 format (secrets then B_ values)
     /// is not accepted: it does not commit to input C values or output amounts.
     fn sig_all_digests_to_verify(&self) -> Vec<[u8; 32]> {
+        if self.is_unpoisonable() {
+            return vec![sig_all_unpoisonable_message_hash_v1(
+                &self.sig_all_msg_to_sign_v1(),
+            )];
+        }
+
         vec![
             sig_all_message_hash_v1(&self.sig_all_msg_to_sign_v1()),
             Sha256Hash::hash(self.sig_all_msg_to_sign().as_bytes()).to_byte_array(),
@@ -400,7 +423,12 @@ pub trait SpendingConditionVerification {
     /// It checks if any input has SIG_ALL and dispatches to the appropriate verification path.
     fn verify_spending_conditions(&self) -> Result<(), Error> {
         // Check if any input has SIG_ALL flag
-        if self.has_at_least_one_sig_all()? {
+        let has_sig_all = self.has_at_least_one_sig_all()?;
+        if self.is_unpoisonable() && !has_sig_all {
+            return Err(Error::SpendConditionsNotMet);
+        }
+
+        if has_sig_all {
             // at least one input has SIG_ALL
             self.verify_full_sig_all_check()
         } else {

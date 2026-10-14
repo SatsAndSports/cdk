@@ -610,7 +610,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::nut10::sig_all_message_hash_v1;
+    use crate::nut10::{sig_all_message_hash_v1, sig_all_unpoisonable_message_hash_v1};
     use crate::nuts::Id;
     use crate::quote_id::QuoteId;
     use crate::secret::Secret;
@@ -638,6 +638,41 @@ mod tests {
             witness: None,
             dleq: None,
             p2pk_e: None,
+        }
+    }
+
+    fn make_sig_all_swap_for_test(signers: &[SecretKey], unpoisonable: bool) -> SwapRequest {
+        let primary = signers[0].public_key();
+        let conditions = Conditions {
+            pubkeys: (signers.len() > 1)
+                .then(|| signers[1..].iter().map(SecretKey::public_key).collect()),
+            num_sigs: Some(signers.len() as u64),
+            sig_flag: SigFlag::SigAll,
+            ..Default::default()
+        };
+        let secret: Secret = SpendingConditions::new_p2pk(primary, Some(conditions))
+            .try_into()
+            .unwrap();
+        let proof = Proof {
+            amount: Amount::ONE,
+            keyset_id: Id::from_str("009a1f293253e41e").unwrap(),
+            secret,
+            c: SecretKey::generate().public_key(),
+            witness: None,
+            dleq: None,
+            p2pk_e: None,
+        };
+        let output = BlindedMessage::new(
+            Amount::ONE,
+            Id::from_str("009a1f293253e41e").unwrap(),
+            SecretKey::generate().public_key(),
+        );
+        let request = SwapRequest::new(vec![proof], vec![output]);
+
+        if unpoisonable {
+            request.with_unpoisonable()
+        } else {
+            request
         }
     }
 
@@ -1482,6 +1517,81 @@ mod tests {
         )
         .unwrap();
         assert!(pubkey.verify_digest(message_hash, &signature).is_ok());
+    }
+
+    #[test]
+    fn test_unpoisonable_sig_all_accepts_only_unpoisonable_digest() {
+        let signer = SecretKey::generate();
+        let mut request = make_sig_all_swap_for_test(std::slice::from_ref(&signer), true);
+        request.sign_sig_all(signer).unwrap();
+
+        assert!(request.verify_spending_conditions().is_ok());
+        assert_eq!(request.sig_all_digests_to_verify().len(), 1);
+        assert_eq!(
+            request.sig_all_digests_to_verify()[0],
+            sig_all_unpoisonable_message_hash_v1(&request.sig_all_msg_to_sign_v1())
+        );
+    }
+
+    #[test]
+    fn test_unpoisonable_sig_all_rejects_ordinary_signature() {
+        let signer = SecretKey::generate();
+        let mut request = make_sig_all_swap_for_test(std::slice::from_ref(&signer), false);
+        request.sign_sig_all(signer).unwrap();
+        let request = request.with_unpoisonable();
+
+        assert!(request.verify_spending_conditions().is_err());
+    }
+
+    #[test]
+    fn test_ordinary_sig_all_rejects_unpoisonable_signature() {
+        let signer = SecretKey::generate();
+        let mut request = make_sig_all_swap_for_test(std::slice::from_ref(&signer), true);
+        request.sign_sig_all(signer).unwrap();
+
+        let mut value = serde_json::to_value(request).unwrap();
+        value.as_object_mut().unwrap().remove("unpoisonable");
+        let ordinary_request: SwapRequest = serde_json::from_value(value).unwrap();
+
+        assert!(ordinary_request.verify_spending_conditions().is_err());
+    }
+
+    #[test]
+    fn test_unpoisonable_sig_all_does_not_mix_authorization_modes() {
+        let first_signer = SecretKey::generate();
+        let second_signer = SecretKey::generate();
+        let mut request =
+            make_sig_all_swap_for_test(&[first_signer.clone(), second_signer.clone()], true);
+
+        let ordinary_digest = sig_all_message_hash_v1(&request.sig_all_msg_to_sign_v1());
+        let ordinary_signature = first_signer.sign_digest(ordinary_digest).to_string();
+        request.inputs_mut()[0].witness = Some(Witness::P2PKWitness(P2PKWitness {
+            signatures: vec![ordinary_signature],
+        }));
+        request.sign_sig_all(second_signer).unwrap();
+
+        assert!(request.verify_spending_conditions().is_err());
+
+        request.sign_sig_all(first_signer).unwrap();
+        assert!(request.verify_spending_conditions().is_ok());
+    }
+
+    #[test]
+    fn test_unpoisonable_swap_requires_sig_all() {
+        let signer = SecretKey::generate();
+        let mut request = make_sig_all_swap_for_test(std::slice::from_ref(&signer), true);
+        let secret = Nut10Secret::try_from(&request.inputs()[0].secret).unwrap();
+        let conditions = Conditions {
+            sig_flag: SigFlag::SigInputs,
+            ..Conditions::try_from(secret.secret_data().tags().cloned().unwrap_or_default())
+                .unwrap()
+        };
+        request.inputs_mut()[0].secret =
+            SpendingConditions::new_p2pk(signer.public_key(), Some(conditions))
+                .try_into()
+                .unwrap();
+
+        assert!(request.verify_spending_conditions().is_err());
     }
 
     #[test]

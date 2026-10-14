@@ -45,6 +45,13 @@ pub struct SwapRequest {
     inputs: Proofs,
     /// Blinded Messages for Mint to sign
     outputs: Vec<BlindedMessage>,
+    /// Whether this swap requires unpoisonable output processing.
+    #[serde(default, skip_serializing_if = "is_false")]
+    unpoisonable: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl SwapRequest {
@@ -53,7 +60,19 @@ impl SwapRequest {
         Self {
             inputs: inputs.without_dleqs(),
             outputs,
+            unpoisonable: false,
         }
+    }
+
+    /// Select unpoisonable output processing for this swap.
+    pub fn with_unpoisonable(mut self) -> Self {
+        self.unpoisonable = true;
+        self
+    }
+
+    /// Whether this swap requires unpoisonable output processing.
+    pub fn is_unpoisonable(&self) -> bool {
+        self.unpoisonable
     }
 
     /// Get inputs (proofs)
@@ -118,6 +137,10 @@ impl super::nut10::SpendingConditionVerification for SwapRequest {
 
     fn sig_all_msg_to_sign_v1(&self) -> Vec<u8> {
         super::nut10::sig_all_msg_to_sign_v1(None, &self.inputs, &self.outputs)
+    }
+
+    fn is_unpoisonable(&self) -> bool {
+        self.unpoisonable
     }
 }
 
