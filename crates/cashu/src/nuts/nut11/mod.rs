@@ -536,9 +536,8 @@ pub struct EnforceSigFlag {
 impl SwapRequest {
     /// Sign swap request with SIG_ALL
     pub fn sign_sig_all(&mut self, secret_key: SecretKey) -> Result<(), Error> {
-        // One signature per accepted SIG_ALL message format (v1, current) so
-        // the request verifies on mints at any upgrade stage; mints ignore
-        // signatures that do not verify.
+        // Ordinary swaps sign v1 and current for compatibility. Unpoisonable
+        // swaps sign only their selected domain, never an ordinary fallback.
         let signatures: Vec<String> = self
             .sig_all_digests_to_verify()
             .into_iter()

@@ -431,6 +431,7 @@ mod tests {
         let mock_client = Arc::new(MockMintConnector::new());
         mock_client.set_check_state_response(Ok(CheckStateResponse {
             states: vec![ProofState {
+                unpoisonable_r: None,
                 y: proof_y,
                 state: State::Spent,
                 witness: None,
@@ -489,6 +490,7 @@ mod tests {
         let mock_client = Arc::new(MockMintConnector::new());
         mock_client.set_check_state_response(Ok(CheckStateResponse {
             states: vec![ProofState {
+                unpoisonable_r: None,
                 y: proof_y,
                 state: State::Unspent,
                 witness: None,
@@ -566,6 +568,7 @@ mod tests {
         let mock_client = Arc::new(MockMintConnector::new());
         mock_client.set_check_state_response(Ok(CheckStateResponse {
             states: vec![ProofState {
+                unpoisonable_r: None,
                 y: proof_y,
                 state: State::Spent,
                 witness: None,
@@ -623,6 +626,7 @@ mod tests {
         let mock_client = Arc::new(MockMintConnector::new());
         mock_client.set_check_state_response(Ok(CheckStateResponse {
             states: vec![ProofState {
+                unpoisonable_r: None,
                 y: proof_y,
                 state: State::Unspent,
                 witness: None,

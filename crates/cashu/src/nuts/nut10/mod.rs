@@ -326,6 +326,7 @@ pub trait SpendingConditionVerification {
     /// any format are ignored; only unique pubkeys with valid signatures count
     /// towards thresholds (NUT-11). The pre-0.14 format (secrets then B_ values)
     /// is not accepted: it does not commit to input C values or output amounts.
+    /// Unpoisonable swaps accept only their separately tagged v1 digest.
     fn sig_all_digests_to_verify(&self) -> Vec<[u8; 32]> {
         if self.is_unpoisonable() {
             return vec![sig_all_unpoisonable_message_hash_v1(
