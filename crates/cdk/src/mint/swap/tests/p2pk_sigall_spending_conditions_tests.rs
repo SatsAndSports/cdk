@@ -365,6 +365,60 @@ async fn test_rerandomized_swap_retries_point_at_infinity() {
 }
 
 #[tokio::test]
+async fn rerandomized_derived_collision_retries_or_fails_without_spending() {
+    use cdk_common::nuts::nut03::{tweak_swap_outputs, RerandomizationR};
+    for exhaust in [false, true] {
+        let helper = TestMintHelper::new().await.unwrap();
+        let mint = helper.mint();
+        let (signer, pubkey) = create_test_keypair();
+        let inputs = mint_sig_all_inputs(&helper, pubkey, Amount::ONE).await;
+        let ys = inputs.ys().unwrap();
+        let (outputs, _) = create_test_blinded_messages(mint, Amount::ONE)
+            .await
+            .unwrap();
+        let collision_r = [0x42; 32];
+        let reserved = tweak_swap_outputs(&collision_r, &outputs).unwrap();
+        let payer = helper.mint_proofs(Amount::ONE).await.unwrap();
+        mint.process_swap_request(SwapRequest::new(payer, reserved))
+            .await
+            .unwrap();
+        let mut request = SwapRequest::new(inputs, outputs).with_rerandomization();
+        request.sign_sig_all(signer).unwrap();
+        let mut attempts = 0;
+        let result = mint
+            .process_swap_with_randomness(request, || {
+                attempts += 1;
+                Ok(if exhaust || attempts == 1 {
+                    collision_r
+                } else {
+                    [0x43; 32]
+                })
+            })
+            .await;
+        let states = mint.check_state(&CheckStateRequest { ys }).await.unwrap();
+        if exhaust {
+            assert!(result.is_err());
+            assert_eq!(attempts, 16);
+            assert!(states
+                .states
+                .iter()
+                .all(|s| s.state == cdk_common::State::Unspent && s.rerandomization_r.is_none()));
+        } else {
+            assert_eq!(attempts, 2);
+            assert_eq!(
+                result.unwrap().rerandomization_r,
+                Some(RerandomizationR([0x43; 32]))
+            );
+            assert!(states
+                .states
+                .iter()
+                .all(|s| s.state == cdk_common::State::Spent
+                    && s.rerandomization_r == Some(RerandomizationR([0x43; 32]))));
+        }
+    }
+}
+
+#[tokio::test]
 async fn rerandomized_completed_swap_recovers_after_mint_restart() {
     use std::sync::Arc;
 
