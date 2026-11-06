@@ -458,4 +458,36 @@ mod tests {
             tweak_blinded_point(&r, &second.blinded_secret).unwrap()
         );
     }
+
+    #[test]
+    fn public_authorization_digest_matches_independent_vector() {
+        use crate::nuts::SpendingConditionVerification;
+        let output = BlindedMessage::new(
+            1.into(),
+            "009a1f293253e41e".parse().unwrap(),
+            PublicKey::from_hex(
+                "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+            )
+            .unwrap(),
+        );
+        let ordinary = SwapRequest::new(vec![], vec![output]);
+        assert_eq!(
+            ordinary.sig_all_message_hash(),
+            Sha256Hash::hash(ordinary.sig_all_msg_to_sign().as_bytes()).to_byte_array()
+        );
+        let mut request = ordinary.with_rerandomization();
+        assert_eq!(
+            crate::util::hex::encode(request.sig_all_message_hash()),
+            "12ba73147194f4528cf2e06b4a557daff57a1f2153938106af49d51c399bbe2a"
+        );
+        let digest = request.sig_all_message_hash();
+        request.outputs_mut()[0].keyset_id = "001234567890abcd".parse().unwrap();
+        assert_eq!(
+            digest,
+            request.sig_all_message_hash(),
+            "keyset IDs are excluded"
+        );
+        request.outputs_mut()[0].amount = 2.into();
+        assert_ne!(digest, request.sig_all_message_hash());
+    }
 }
