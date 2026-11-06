@@ -325,6 +325,19 @@ pub trait SpendingConditionVerification {
         None
     }
 
+    /// Canonical 32-byte SIG_ALL authorization digest for this request.
+    ///
+    /// Ordinary requests use SHA-256 of the ordinary message. Rerandomized swaps
+    /// use the separately tagged hash of the original-output transcript. External
+    /// BIP-340 signers must sign these bytes directly, without hashing again.
+    /// This computes a digest only; it does not validate spending conditions.
+    fn sig_all_message_hash(&self) -> [u8; 32] {
+        match self.rerandomized_sig_all_msg_to_sign() {
+            Some(message) => rerandomized_sig_all_message_hash(&message),
+            None => Sha256Hash::hash(self.sig_all_msg_to_sign().as_bytes()).to_byte_array(),
+        }
+    }
+
     /// Check if at least one proof in the set has SIG_ALL flag set
     ///
     /// SIG_ALL requires all proofs in the transaction to be signed.
@@ -441,10 +454,7 @@ pub trait SpendingConditionVerification {
         let first_input = self.inputs().first().ok_or(Error::SpendConditionsNotMet)?;
         let first_secret =
             Secret::try_from(&first_input.secret).map_err(|_| Error::IncorrectSecretKind)?;
-        let digest = match self.rerandomized_sig_all_msg_to_sign() {
-            Some(message) => rerandomized_sig_all_message_hash(&message),
-            None => Sha256Hash::hash(self.sig_all_msg_to_sign().as_bytes()).to_byte_array(),
-        };
+        let digest = self.sig_all_message_hash();
 
         // Dispatch based on secret kind
         match first_secret.kind() {

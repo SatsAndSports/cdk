@@ -541,12 +541,7 @@ pub struct EnforceSigFlag {
 impl SwapRequest {
     /// Sign swap request with SIG_ALL
     pub fn sign_sig_all(&mut self, secret_key: SecretKey) -> Result<(), Error> {
-        let signature = match self.rerandomized_sig_all_msg_to_sign() {
-            Some(message) => {
-                secret_key.sign_digest(crate::nut10::rerandomized_sig_all_message_hash(&message))
-            }
-            None => secret_key.sign(self.sig_all_msg_to_sign().as_bytes())?,
-        };
+        let signature = secret_key.sign_digest(self.sig_all_message_hash());
 
         // Add signature to first input witness
         let first_input = self
@@ -711,6 +706,34 @@ mod tests {
         let request = request.with_rerandomization();
 
         assert!(request.verify_spending_conditions().is_err());
+    }
+
+    #[test]
+    fn external_digest_signing_matches_both_sig_all_domains() {
+        for rerandomize in [false, true] {
+            let alice = SecretKey::generate();
+            let charlie = SecretKey::generate();
+            let mut request =
+                make_sig_all_swap_for_test(&[alice.clone(), charlie.clone()], rerandomize);
+            let digest = request.sig_all_message_hash();
+            request.inputs_mut()[0].witness = Some(Witness::P2PKWitness(P2PKWitness {
+                signatures: vec![alice.sign_digest(digest).to_string()],
+            }));
+            assert!(request.verify_spending_conditions().is_err());
+            request.sign_sig_all(charlie.clone()).unwrap();
+            assert!(request.verify_spending_conditions().is_ok());
+            assert_eq!(request.sig_all_message_hash(), digest);
+            request.inputs_mut()[0].witness = Some(Witness::P2PKWitness(P2PKWitness {
+                signatures: vec![
+                    alice.sign_digest(digest).to_string(),
+                    charlie.sign(&digest).unwrap().to_string(),
+                ],
+            }));
+            assert!(
+                request.verify_spending_conditions().is_err(),
+                "double hashing must reject"
+            );
+        }
     }
 
     #[test]
